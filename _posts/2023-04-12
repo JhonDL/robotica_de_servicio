@@ -1,1 +1,43 @@
+---
+title: "Auto Parking"
+date: 2023-12-04
+---
 
+Implementación de una solución para el ejercicio 
+<a href="http://jderobot.github.io/RoboticsAcademy/exercises/AutonomousCars/autoparking/">Auto Parking </a>
+de Unibotics.
+
+El objetivo de la practica es realizar un sistema de aparcamiento automatico en un coche "robot" con sensor laser y brujula. Incorpora tambien un GPS con mucho ruido el cual se desaconseja utilizar.
+
+Para abordar esta practica he decidido primero leer el laser y pasarlo a una representacion de puntos cartesianos. Posteriormente realizamos las maniobras de aparcamiento dependiendo de la situacion y espacio que se tenga.
+
+Para pasar de los datos del laser, que viene en coordenadas polares, a puntos cartesianos con la siguientes ecuaciones:
+    x = r * np.cos(theta)
+    y = r * np.sin(theta)
+
+Posteriormente unimos la informacion de los 3 laseres, teniendo en cuenta el desplazamiento y rotacion de cada uno.
+De esta manera obtenemos un array 2d con la informacion de todos los puntos.
+
+Las maniobras de aparcamiento son las siguientes:
+1. Aproximación: El coche se aproxima a la derecha hasta detectar un vehiculo ya aparcado.
+
+2. Alineación: El coche se alinea de manera paralela con el coche aparcado, para detectar la orientacion del coche con la funcion "polyfit" aproximando los puntos detectados a una ecuacion de orden 1.
+
+3. Busqueda: El coche avanza hasta encontrar un hueco libre.
+
+4. Preparking: El coche se posiciona para realizar la maniobra de aparcar.
+
+5. Parking: Esta maniobra se ha desglosado en dos submaniobras:
+  5.1 Parking hacia atras, el coche maniobra hacia atras  hasta detectar un obstaculo (por ejemplo un coche atras)
+  5.2 Parking hacia adelante, el coche maniobra hacia adelante hasta detectar un obstaculo adelante.
+  Estas maniobras se repiten hasta tener el coche bien posicionado en el sitio de estacionamiento.
+
+Primero se implementó un coche holonomico.
+
+Y posteriormente en un coche no holonómico con un movimiento mas realista.
+
+{% include youtube.html id="aPlL9ACD3pc" %}
+Finalmente, se tuvo en cuenta otro tipo de situaciones, por ejemplo tener un hueco de aparcar detras de otro coche, no entre dos coches como antes.
+Para esta situacion se comprueba si desde un principio el coche esta detectando un espacio libre para aparcar, entonces salta directamente desde el estado aproximar, al estado preparking ya que la busqueda del espacio de aparcamiento no es necesaria.
+
+{% include youtube.html id="h0lhnKUIGdk" %}
