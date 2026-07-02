@@ -24,7 +24,6 @@ Los giros se hacen a orientaciones absolutas (cardinales) en lugar de relativas,
 
 Para el retorno al punto de backtracking se usa una búsqueda en anchura (BFS) sobre la rejilla, que garantiza el camino más corto en número de celdas y es robusto frente a obstáculos cóncavos. El robot sigue el camino resultante celda a celda hasta reanudar la espiral.
 
-{% include youtube.html id="TU_VIDEO_AQUI" %}
 
 ## Problemas afrontados
 
