@@ -1,0 +1,136 @@
+---
+title: "Autoparking"
+date: 2026-07-02
+---
+# Práctica: Autoparking
+
+Implementación de un algoritmo de aparcamiento autónomo para un vehículo Prius sobre el ejercicio **Autoparking** de [Robotics Academy (JdeRobot)](https://jderobot.github.io/RoboticsAcademy/).
+
+El objetivo es que el vehículo recorra una calle, localice una plaza libre entre coches aparcados y ejecute la maniobra de aparcamiento en linea lateral.
+
+---
+
+## Enfoque general
+
+La solución se estructura como una **máquina de estados finita (FSM)**. Cada iteración del bucle de control lee los sensores, evalúa el estado actual, fija velocidades (`HAL.setV`, `HAL.setW`) y decide si transita a otro estado.
+
+Se optó por reescribir la lógica desde cero con una FSM limpia en lugar de ir acumulando parches sobre un bucle monolítico. Esto mantiene cada fase de la maniobra aislada y con una única responsabilidad, lo que facilita depurar y afinar constantes fase a fase.
+
+Una decisión de diseño transversal es que la **orientación de la fila de coches (`parking_angle`) se calcula una sola vez** y se guarda en el marco del mapa. Todos los estados posteriores miden su error de rumbo contra esa referencia absoluta, de modo que las condiciones de parada son fiables aunque la velocidad real del vehículo no sea perfecta.
+
+---
+
+## Percepción: del láser al mundo
+
+Toda la percepción se apoya en los tres láseres (frontal, derecho y trasero) y en la odometría. Se construyeron varias funciones auxiliares:
+
+**`laser_to_cartesian`** — Convierte las 180 medidas polares del láser a coordenadas cartesianas `(x, y)` en el marco del sensor. El paso angular se interpola entre `minAngle` y `maxAngle` dividiendo entre `n - 1`, de forma que el primer índice cae exactamente en `minAngle` y el último en `maxAngle`. Descarta medidas fuera de `[minRange, maxRange]`.
+
+**`agrupar_puntos`** — Aprovecha que los puntos vienen ordenados por ángulo: dos puntos consecutivos separados más de `max_gap` marcan el inicio de otro objeto. Devuelve clusters, descartando los que tienen muy pocos puntos (ruido).
+
+**`caja`** — Reduce un cluster a una caja rectangular robusta frente a ruido. En lugar del mínimo/máximo absoluto (sensible a un único punto disparado), promedia los `k` puntos más extremos en cada dirección, y sitúa el centro en la media de *todos* los puntos.
+
+**`min_center`** — Distancia mínima en una ventana central del escaneo. Se usa para medir la distancia perpendicular real (frontal, trasera o lateral a 90°).
+
+**`dist_cajas`** — Distancia al punto más cercano de cualquier cluster detectado dentro de un rango. Sirve para saber *si hay* coches a un lado, no para medir el vacío.
+
+**`orientacion_fila`** — Ajusta una recta a los puntos laterales mediante **PCA (SVD)** y devuelve su ángulo. Se eligió PCA en lugar de mínimos cuadrados clásicos porque no falla ante filas casi verticales. El ángulo se normaliza a `(-π/2, π/2]` para resolver la ambigüedad de π de una recta.
+
+---
+
+## Máquina de estados
+
+```mermaid
+stateDiagram-v2
+    [*] --> SEARCHING
+
+    SEARCHING --> APPROACHING : coche detectado a la derecha
+    APPROACHING --> ALLIGNING : distancia lateral/frontal < 2.4 m
+    ALLIGNING --> SCANNING : rumbo alineado con parking_angle
+
+    SCANNING --> PREPARKING_BW : hueco entre 5 y 8 m
+    SCANNING --> PREPARKING_FW : hueco > 8 m
+
+    PREPARKING_BW --> PARKING_BW_TURN_1 : adelantado 3.4 m
+    PARKING_BW_TURN_1 --> PARKING_BW_TURN_2 : desviación ~40° / freno trasero
+    PARKING_BW_TURN_2 --> CENTER : rumbo recuperado / freno trasero
+
+    PREPARKING_FW --> PARKING_FW_TURN_1 : reaparece coche a la derecha
+    PARKING_FW_TURN_1 --> PARKING_FW_TURN_2 : desviación ~40° / freno frontal
+    PARKING_FW_TURN_2 --> CENTER : rumbo recuperado / freno frontal
+
+    CENTER --> FINISHED : centrado y alineado
+    FINISHED --> [*]
+```
+
+> Las ramas **BW** (marcha atrás, hueco de 5–8 m) y **FW** (marcha adelante, hueco > 8 m) confluyen en el mismo estado `CENTER`, que corrige orientación y centra el vehículo sin importar de dónde venga.
+
+---
+
+## Descripción de los estados
+
+**SEARCHING** — Avanza recto a velocidad alta hasta que `dist_cajas` detecta coches a la derecha.
+
+**APPROACHING** — Reduce velocidad y gira ligeramente a la derecha para acercarse a la fila, hasta quedar a menos de 2.4 m (lateral o frontal).
+
+**ALLIGNING** — La primera vez calcula `parking_angle = pose.yaw + orientacion_fila(...)`, fijando la orientación de la plaza en el marco del mapa. Después aplica un control **P con saturación** sobre el error de rumbo hasta alinearse.
+
+**SCANNING** — Avanza manteniendo el rumbo y mide el hueco lateral por **odometría**: marca `gap_start` cuando desaparece el coche a la derecha y mide el desplazamiento recorrido.
+- Si el hueco alcanza **8 m**, se compromete de inmediato como plaza grande → `PREPARKING_FW`.
+- Si al cerrarse el hueco medía **entre 5 y 8 m** → `PREPARKING_BW`.
+- Si medía **menos de 5 m**, lo descarta y sigue escaneando.
+
+**PREPARKING_BW** — Se adelanta 3.4 m manteniendo la alineación, hasta quedar a la altura del coche delantero, y pasa al primer giro.
+
+**PARKING_BW_TURN_1** — Volante a tope hacia el hueco y marcha atrás hasta desviarse ~40° del `parking_angle` (o freno de seguridad si detecta algo detrás).
+
+**PARKING_BW_TURN_2** — Volante al lado contrario, sigue atrás para enderezar hasta recuperar `parking_angle`.
+
+**PREPARKING_FW** — Reversea manteniendo el rumbo hasta que el láser derecho vuelve a detectar el coche previo al hueco (su morro), fijando el punto de inicio del giro.
+
+**PARKING_FW_TURN_1 / TURN_2** — Simétricos a la rama BW pero avanzando hacia delante, con los frenos de seguridad mirando la distancia frontal.
+
+**CENTER** — Corrige orientación **y** centra a la vez. Elige el sentido de avance hacia el hueco mayor y solo invierte la marcha al acercarse a menos de ~0.20 m de un extremo (histéresis con memoria `last_v`). Al ir hacia atrás, la corrección de rumbo se aplica con signo invertido. Termina cuando el error de rumbo y el balance `d_front − d_back` entran en tolerancia.
+
+**FINISHED** — Detiene el vehículo.
+
+---
+
+## Problemas encontrados y soluciones
+
+**Sensibilidad al ruido en las cajas.** Tomar el mínimo/máximo absoluto de un cluster hace que un solo punto disparado desplace el borde entero. Se resolvió promediando los `k` puntos más extremos en cada dirección y usando la media de todos los puntos para el centro.
+
+**Elección del sensor para detectar el hueco.** Inicialmente se usó `dist_cajas` para saber si había coche al lado, pero devuelve el punto más cercano de *cualquier* cluster: en mitad de un hueco entrega la esquina del coche de delante o de detrás, no el vacío lateral. Se cambió a `min_center` sobre el láser derecho, que mide la distancia perpendicular real: en el hueco lee la calle de enfrente (>3 m) y junto a un coche lee ~1.4–2 m.
+
+**Medida del hueco.** Medir longitudes con el láser directamente era frágil. Se optó por **odometría**: marcar la posición donde empieza el hueco e integrar el desplazamiento. Esto permite además la lógica de "sigo avanzando para ver si el hueco supera los 8 m antes de decidir la rama".
+
+**Signos de giro.** La convención ROS (W positivo = antihorario = izquierda) y, sobre todo, la **inversión de la geometría al ir marcha atrás** obligan a verificar el signo del volante empíricamente. Se centralizó en una constante `GIRO`: ajustándola una vez, ambos giros de la maniobra (que usan `GIRO` y `-GIRO`) quedan coherentes. El umbral de rumbo no detecta un signo mal puesto, así que hubo que confirmarlo visualmente.
+
+**Entrada torcida en `CENTER`.** Se puede llegar a `CENTER` desde un "freno por trasera", es decir, mal orientado. La solución fue un único controlador que corrige rumbo y centra simultáneamente: cada pasada (adelante o atrás, con el signo de volante adecuado) reduce el error de rumbo, y el balance frontal/trasero converge a cero en paralelo.
+
+**Temblor en el centrado.** Invertir el sentido en cuanto el balance cruzaba cero producía un vaivén nervioso. Se añadió **histéresis** con la variable de memoria `last_v`: el sentido solo cambia al acercarse mucho a un extremo, de modo que el coche hace pasadas completas que además enderezan mejor el rumbo.
+
+**Punto de partida de `PREPARKING_FW`.** Como la rama FW se compromete tras avanzar 8 m dentro del hueco, al entrar en `PREPARKING_FW` el vehículo está muy metido, lejos del coche previo. Un retroceso de distancia fija no bastaba. Se resolvió reverseando hasta que el láser derecho **vuelve a detectar** el coche anterior al hueco, que marca de forma natural la altura de su morro y el punto correcto para iniciar el giro.
+
+---
+
+## Constantes y ajuste
+
+Las constantes principales y su efecto:
+
+| Constante | Valor | Qué controla |
+|-----------|-------|--------------|
+| Umbral `APPROACHING` | 2.4 m | Distancia a la que deja de acercarse a la fila |
+| Ganancia P de rumbo | 2.0 | Rapidez de alineación; oscila si es alta, lento si baja |
+| Umbral hueco pequeño / grande | 5 m / 8 m | Frontera entre descartar, BW y FW |
+| `d_side` "hay coche" | 3.0 m | Separa hueco de coche en el láser lateral |
+| Adelantamiento BW | 3.4 m | Dónde empieza el giro de marcha atrás |
+| Umbral de giro | ~0.70 rad (~40°) | Apertura de la maniobra |
+| `GIRO` | ±1.0 | Sentido del volante en las maniobras |
+| Histéresis `CENTER` | 0.20 m | Cuándo invertir la marcha al centrar |
+
+> **Nota sobre la rama FW:** el enunciado pide dejarla implementada, pero no se dispuso de un escenario con hueco grande para validarla. Su lógica es simétrica a la rama BW (ya probada y funcional), por lo que sus constantes son estimaciones razonables; el único parámetro realmente incierto sería el punto de partida del giro, que aquí se resuelve por detección láser en lugar de por distancia fija.
+
+---
+
+*Ejercicio Autoparking · Robotics Academy (JdeRobot)*
