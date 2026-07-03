@@ -12,6 +12,27 @@ El algoritmo elegido es BSA (Backtracking Spiral Algorithm): el robot barre en e
 
 La solución se organiza como una máquina de estados, de modo que el bucle de control late a frecuencia fija y cada estado da un paso y cede el control, sin funciones bloqueantes. Los estados son: followBSA (decisión), rotate (giro), forward (avance), goToBacktrackingPoint (retorno) y finished.
 
+<pre class="mermaid">
+stateDiagram-v2
+    [*] --> followBSA
+    followBSA --> forward: RS4 avanzar
+    followBSA --> rotate: RS2/RS3 girar
+    followBSA --> goToBacktrackingPoint: RS1 rodeado
+    rotate --> forward: giro completado
+    forward --> followBSA: llegada / obstaculo
+    forward --> goToBacktrackingPoint: siguiendo camino
+    goToBacktrackingPoint --> rotate: siguiente celda
+    goToBacktrackingPoint --> forward: siguiente celda
+    goToBacktrackingPoint --> followBSA: camino terminado
+    goToBacktrackingPoint --> finished: sin puntos pendientes
+    finished --> [*]
+</pre>
+
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({ startOnLoad: true });
+</script>
+
 Sobre el mapa se construye una rejilla de navegación a partir de la imagen conocida: binarización, inversión y dilatación de los obstáculos por el radio del robot (espacio de configuraciones). Cada celda tiene tres estados posibles: libre, visitada u obstáculo.
 
 Las reglas de decisión de BSA en cada celda son:
@@ -24,6 +45,7 @@ Los giros se hacen a orientaciones absolutas (cardinales) en lugar de relativas,
 
 Para el retorno al punto de backtracking se usa una búsqueda en anchura (BFS) sobre la rejilla, que garantiza el camino más corto en número de celdas y es robusto frente a obstáculos cóncavos. El robot sigue el camino resultante celda a celda hasta reanudar la espiral.
 
+<iframe width="560" height="315" src="https://www.youtube.com/embed/B2bdMVh616Y" frameborder="0" allowfullscreen></iframe>
 
 ## Problemas afrontados
 
