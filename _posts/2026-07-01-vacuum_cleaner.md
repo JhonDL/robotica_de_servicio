@@ -10,7 +10,7 @@ El objetivo de la práctica es que un robot aspirador cubra toda la superficie n
 
 El algoritmo elegido es BSA (Backtracking Spiral Algorithm): el robot barre en espiral hasta quedar rodeado de celdas ya visitadas o de obstáculos, y en ese momento navega hasta la celda sin visitar más cercana para reiniciar otra espiral. El proceso se repite hasta que no quedan celdas pendientes alcanzables.
 
-La solución se organiza como una máquina de estados, de modo que el bucle de control late a frecuencia fija y cada estado da un paso y cede el control, sin funciones bloqueantes. Los estados son: followBSA (decisión), rotate (giro), forward (avance), goToBacktrackingPoint (retorno) y finished.
+La solución se organiza como una máquina de estados, de modo que el bucle de control late a frecuencia fija y cada estado da un paso y cede el control, sin funciones bloqueantes. Los estados son: followBSA (algoritmo cobertura), rotate (giro), forward (avance), goToBacktrackingPoint (retorno) y finished.
 
 <pre class="mermaid">
 stateDiagram-v2
@@ -59,4 +59,4 @@ Durante el desarrollo aparecieron varios problemas cuya resolución fue la parte
 
 ## Limitaciones y mejora futura
 
-La corrección de pose actúa sobre la componente normal a la pared que el robot encara, por lo que la deriva lateral se compensa al enfrentar paredes perpendiculares en otros carriles. Una corrección más general por scan-matching (ICP) eliminaría la deriva residual, pero se optó por la solución más simple por ser proporcional al problema, dado que el SLAM ya proporciona una localización suficiente.
+Las celdas parcialmente ocupadas no se visitan, el robot deja gran parte del camino cercano a las paredes sin limpiar, se podría resolver con BSA extendido.
